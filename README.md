@@ -13,15 +13,6 @@ cd `go env GOPATH`/bin
 ./brute <hash> <template>
 ```
 
-![alt text](./example.png)
-
-### Notes
-- Only work for words consisting of following lowercase characters
-`oenatvsilkrdpímuázjyěcbéhřýžčšůfgúňxťóďwq` and space
-- the hash is 32bit version of murmur3 encoded using base36
-- intended to be run in interactive shell
-
-
 ### Examples
 ```bash 
 # Find 5 characters long word
@@ -43,6 +34,16 @@ cd `go env GOPATH`/bin
 # default is threads/2 - 1, but at least 2
 WORKERS=15 ./brute 6dgtio 7
 ```
+
+
+![alt text](./example.png)
+
+### Notes
+- Only work for words consisting of following lowercase characters
+`oenatvsilkrdpímuázjyěcbéhřýžčšůfgúňxťóďwq` and space
+- the hash is 32bit version of murmur3 encoded using base36
+- intended to be run in interactive shell
+
 
 ### Performance (Ryzen 7 - 8 cores - 3.7GHz):
  - 5 chars: ~150 million tries per second
