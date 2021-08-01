@@ -1,5 +1,11 @@
 ## Tool to find word from the murmur3 hash
 
+### Install
+[Install Go](https://golang.org/doc/install)
+```bash
+go get github.com/drahoslove/brute
+```
+
 ### Usage
 ```
 ./brute <hash> <len>

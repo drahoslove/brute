@@ -1,4 +1,4 @@
-module hack
+module github.com/drahoslove/brute
 
 go 1.13
 
