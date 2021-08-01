@@ -3,7 +3,8 @@
 ### Install
 [Install Go](https://golang.org/doc/install)
 ```bash
-go get github.com/drahoslove/brute
+go get -u -v github.com/drahoslove/brute
+cd `go env GOPATH`/bin
 ```
 
 ### Usage
