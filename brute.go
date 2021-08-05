@@ -1,7 +1,6 @@
 package main
 
 import (
-	"errors"
 	"fmt"
 	"math"
 	"os"
@@ -57,11 +56,11 @@ func init() {
 }
 
 func main() {
-	if len(os.Args) == 1 {
+	if len(os.Args) != 3 {
+		fmt.Println("invalid number of arguments")
 		return
 	}
 
-	var hash uint32 = 0
 	var wordLen = 5
 	var templ = []rune{}
 
@@ -93,15 +92,20 @@ func main() {
 	}
 
 	// test words from wordlist first
-	for _, word := range wordlist {
-		var buf = make([]byte, 3*2*len(word)) // each char is up to 2 bytes encoded in 3 chars
-		if murmur3.Sum32(escape([]rune(word), buf)) == hash {
-			fmt.Printf("\nWordlist found: %s \n ", string(word))
-			return
-		}
-	}
+	// for _, word := range wordlist {
+	// 	var buf = make([]byte, 3*2*len(word)) // each char is up to 2 bytes encoded in 3 chars
+	// 	if murmur3.Sum32(escape([]rune(word), buf)) == HASH {
+	// 		fmt.Printf("\nWordlist found: %s \n ", string(word))
+	// 		return
+	// 	}
+	// }
 
 	fmt.Printf("chars/wordlen: %v/%v \n\n\n", wordLen-knownChars, wordLen)
+
+	if wordLen-knownChars > 10 {
+		fmt.Printf("Too long - I give up")
+		return
+	}
 
 	timeStart = time.Now()
 
@@ -186,26 +190,22 @@ func main() {
 func escape(text []rune, t []byte) []byte { // WARKING only works on subset of unicode
 	j := 0
 	for _, c := range text {
-		if c > 0x7F || c == ' ' { // encode rune to utf8 coding and escape as encodeURI
-			if c < 0x7F { // 0xxxxxxx
-				t[j] = '%'
-				t[j+1] = "0123456789abcdef"[byte(c)>>4]
-				t[j+2] = "0123456789abcdef"[byte(c)&15]
-				j += 3
-			} else if c < 0x7FF { // 110xxxxx 10xxxxxx
-				b2 := byte(0b10_000000 | (0b00_111111 & c))
-				b1 := byte(0b110_00000 | (0b000_11111 & (c >> 6)))
-				t[j] = '%'
-				t[j+1] = "0123456789abcdef"[b1>>4]
-				t[j+2] = "0123456789abcdef"[b1&15]
-				j += 3
-				t[j] = '%'
-				t[j+1] = "0123456789abcdef"[b2>>4]
-				t[j+2] = "0123456789abcdef"[b2&15]
-				j += 3
-			} else {
-				panic(errors.New("cannot escape rune"))
-			}
+		if c == ' ' { // encode rune to utf8 coding and escape as encodeURI
+			t[j] = '%'
+			t[j+1] = "0123456789abcdef"[byte(c)>>4]
+			t[j+2] = "0123456789abcdef"[byte(c)&15]
+			j += 3
+		} else if c > 0x7F { // 110xxxxx 10xxxxxx
+			b2 := byte(0b10_000000 | (0b00_111111 & c))
+			b1 := byte(0b110_00000 | (0b000_11111 & (c >> 6)))
+			t[j] = '%'
+			t[j+1] = "0123456789abcdef"[b1>>4]
+			t[j+2] = "0123456789abcdef"[b1&15]
+			j += 3
+			t[j] = '%'
+			t[j+1] = "0123456789abcdef"[b2>>4]
+			t[j+2] = "0123456789abcdef"[b2&15]
+			j += 3
 		} else {
 			t[j] = byte(c)
 			j++
@@ -280,6 +280,7 @@ func cracker(id int, chars chan rune, commonTempl []rune, progress chan Progress
 		var max = int(math.Pow(float64(radix), float64(wordLen-knownChars))) // max iteration
 
 		var buf = make([]byte, 3*2*len(word)) // each char is up to 2 bytes encoded in 3 chars
+		const modPrint = 1 << 8
 
 		for i := 0; i < max; i++ {
 			for pos, ci := range indexes { // asign chars to word by indexes
@@ -289,16 +290,14 @@ func cracker(id int, chars chan rune, commonTempl []rune, progress chan Progress
 					word[pos] = CHARS[ci]
 				}
 			}
-			if i%200000 == 0 {
+			if i%modPrint == 0 {
 				select {
 				case progress <- Progress{word, counter}:
-					// fmt.Println(id, "xx", string(word))
 				default: // nothing
-					// fmt.Println(id, "-", string(word))
 				}
 			}
 			counter++
-			if murmur3.Sum32(escape(word, buf)) == HASH { // check if word is matching
+			if murmur3.Sum32WithSeed(escape(word, buf), 0) == HASH { // check if word is matching
 				note := "?"
 				if isPossibleWord(word) {
 					note = "✔"
@@ -312,7 +311,10 @@ func cracker(id int, chars chan rune, commonTempl []rune, progress chan Progress
 				}
 				if i%mod == mod-1 {
 					indexes[pos]++
-					indexes[pos] %= radix
+
+					if indexes[pos] == radix {
+						indexes[pos] = 0
+					}
 				}
 				mod *= radix
 			}
@@ -323,6 +325,9 @@ func cracker(id int, chars chan rune, commonTempl []rune, progress chan Progress
 }
 
 func spaces(n int) string {
+	if n < 0 {
+		return ""
+	}
 	return strings.Repeat(" ", n)
 }
 
@@ -331,5 +336,4 @@ func isPossibleWord(word []rune) bool {
 	return len(word) <= 4 || isSyllabes.Match(w) &&
 		!tooMuchConsonants.Match(w) &&
 		!tooMuchVowels.Match(w)
-
 }

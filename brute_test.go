@@ -28,7 +28,7 @@ func origEscape(text []rune) []byte {
 
 func TestIsWord(t *testing.T) {
 	for _, word := range wordlist {
-		if !isWord([]rune(word)) {
+		if !isPossibleWord([]rune(word)) {
 			t.Errorf("%s should be matched as possible word but it is not", word)
 		}
 	}
