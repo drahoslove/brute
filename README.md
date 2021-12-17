@@ -45,7 +45,7 @@ WORKERS=15 ./brute 6dgtio 7
 - intended to be run in interactive shell
 
 
-### Performance (Ryzen 7 - 8 cores - 3.7GHz):
+### Performance (Ryzen 7 - 8 cores - 3.7GHz - 7 workers):
  - 5 chars: ~150 million tries per second
  - 6 chars: ~135 million tries per second
  - 7 chars: ~120 million tries per second
