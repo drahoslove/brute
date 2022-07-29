@@ -10,6 +10,9 @@ import (
 	"strings"
 	"sync"
 	"time"
+	"unicode/utf8"
+
+	"runtime/pprof"
 
 	"github.com/spaolacci/murmur3"
 )
@@ -22,7 +25,7 @@ type Progress struct {
 }
 
 // var CHARS = []rune("oenatvsilkrdpmuzjycbhfg")             // -xwq
-var CHARS = []rune("oenatvsilkrdpímuázjyěcbéhřýžčšůfgúňxťóďwq") // -xťóďwq
+var CHARS = []rune("oenatvsilkrdpímuázjyěcbéhřýžčšůfgúňxťóďwqχ") // -xťóďwq
 
 var timeStart = time.Time{}
 
@@ -115,6 +118,11 @@ func main() {
 	progresses := make([](chan Progress), WORKERS)
 	var max = int(math.Pow(float64(len(CHARS)), float64(wordLen-knownChars))) // max iteration
 
+	file, _ := os.Create("./cpu.pprof")
+	pprof.StartCPUProfile(file)
+	defer pprof.StopCPUProfile()
+	// defer file.Close()
+
 	go func() { // output printer
 		ticker := time.NewTicker(time.Second / 30)
 		words := make([]string, WORKERS)
@@ -134,7 +142,10 @@ func main() {
 				counter := 0
 				for i := 0; i < WORKERS; i++ {
 					if prog, ok := <-progresses[i]; ok {
-						words[i] = string(prog.word)
+						word := string(prog.word)
+						if utf8.RuneCountInString(word) == wordLen { // to prevent glitches caused by thread unsafe reading of words from workers
+							words[i] = word
+						}
 						counts[i] = prog.counter
 					}
 					counter += counts[i]
@@ -189,22 +200,23 @@ func main() {
 
 func escape(text []rune, t []byte) []byte { // WARKING only works on subset of unicode
 	j := 0
+	hex := "0123456789abcdef"
 	for _, c := range text {
 		if c == ' ' { // encode rune to utf8 coding and escape as encodeURI
 			t[j] = '%'
-			t[j+1] = "0123456789abcdef"[byte(c)>>4]
-			t[j+2] = "0123456789abcdef"[byte(c)&15]
+			t[j+1] = hex[byte(c)>>4]
+			t[j+2] = hex[byte(c)&15]
 			j += 3
 		} else if c > 0x7F { // 110xxxxx 10xxxxxx
 			b2 := byte(0b10_000000 | (0b00_111111 & c))
 			b1 := byte(0b110_00000 | (0b000_11111 & (c >> 6)))
 			t[j] = '%'
-			t[j+1] = "0123456789abcdef"[b1>>4]
-			t[j+2] = "0123456789abcdef"[b1&15]
+			t[j+1] = hex[b1>>4]
+			t[j+2] = hex[b1&15]
 			j += 3
 			t[j] = '%'
-			t[j+1] = "0123456789abcdef"[b2>>4]
-			t[j+2] = "0123456789abcdef"[b2&15]
+			t[j+1] = hex[b2>>4]
+			t[j+2] = hex[b2&15]
 			j += 3
 		} else {
 			t[j] = byte(c)
@@ -302,7 +314,9 @@ func cracker(id int, chars chan rune, commonTempl []rune, progress chan Progress
 				if isPossibleWord(word) {
 					note = "✔"
 				}
-				fmt.Printf("%s%sWord found: %s %s %s\n\n\n", CURSUP, CURSUP, string(word), note, spaces((wordLen+1)*(WORKERS-1)-11))
+				fmt.Printf("%s%sWord found: %s %s %s\n\n\n",
+					CURSUP, CURSUP, strings.Replace(string(word), "χ", "ch", 1), note, spaces((wordLen+1)*(WORKERS-1)-11),
+				)
 			}
 			// increment indexes
 			for pos, mod := 0, 1; pos < wordLen; pos++ {
