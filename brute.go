@@ -27,6 +27,63 @@ type Progress struct {
 // var CHARS = []rune("oenatvsilkrdpmuzjycbhfg")             // -xwq
 var CHARS = []rune("oenatvsilkrdpímuázjyěcbéhřýžčšůfgúňxťóďwqχ") // -xťóďwq
 
+var DECANON_MAP = map[rune]string{
+	'a': "aá",
+	'á': "aá",
+	'b': "b",
+	'c': "cčχ",
+	'č': "cčχ",
+	'χ': "cčχ",
+	'd': "dď",
+	'ď': "dď",
+	'e': "eéě",
+	'é': "eéě",
+	'ě': "eéě",
+	'f': "f",
+	'g': "g",
+	'h': "h",
+	'i': "iíyý",
+	'í': "iíyý",
+	'y': "iíyý",
+	'ý': "iíyý",
+	'j': "j",
+	'k': "k",
+	'l': "l",
+	'm': "m",
+	'n': "nň",
+	'ň': "nň",
+	'o': "oó",
+	'ó': "oó",
+	'p': "p",
+	'r': "rř",
+	'ř': "rř",
+	's': "sš",
+	'š': "sš",
+	't': "tť",
+	'ť': "tť",
+	'u': "uůú",
+	'ů': "uůú",
+	'ú': "uůú",
+	'v': "vw",
+	'w': "vw",
+	'x': "x",
+	'z': "zž",
+	'ž': "zž",
+}
+
+func decanon(word []rune, hint []int) []rune {
+	decanWord := make([]rune, len(word))
+	copy(decanWord, word)
+	for i, r := range decanWord {
+		alts, exists := DECANON_MAP[r]
+		ralts := []rune(alts)
+		if exists {
+			decanWord[i] = ralts[hint[i]%len(ralts)]
+		}
+	}
+	return decanWord
+}
+
 var timeStart = time.Time{}
 
 const HASH_BASE = 36
@@ -59,7 +116,7 @@ func init() {
 }
 
 func main() {
-	if len(os.Args) != 3 {
+	if len(os.Args) != 3 && len(os.Args) != 4 {
 		fmt.Println("invalid number of arguments")
 		return
 	}
@@ -77,7 +134,8 @@ func main() {
 	HASH = uint32(h)
 	knownChars := 0
 
-	if len(os.Args) > 2 {
+	// set templ and wordlen from second arg
+	{
 		l, err := strconv.ParseUint(os.Args[2], 10, 32)
 		if err != nil { // template as arg
 			wordLen = len([]rune(os.Args[2]))
@@ -91,6 +149,15 @@ func main() {
 		} else { // size as arg
 			wordLen = int(l)
 			templ = make([]rune, wordLen)
+		}
+	}
+
+	var decanonHint []int = nil
+	if len(os.Args) > 3 { // decanon hint
+		decanonHint = make([]int, len(os.Args[3]))
+		for i, c := range os.Args[3] {
+			l, _ := strconv.ParseUint(string(c), HASH_BASE, 32)
+			decanonHint[i] = int(l)
 		}
 	}
 
@@ -130,13 +197,13 @@ func main() {
 
 		mutex := sync.Mutex{}
 
-		done := false
+		done := false // used to stop the printer
 
 		defer ticker.Stop()
 		for {
 			select {
 			case <-allDone:
-				done = true
+				done = true // set to stop in next ticker
 			case <-ticker.C:
 				mutex.Lock()
 				counter := 0
@@ -171,7 +238,7 @@ func main() {
 				)
 				fmt.Printf("% -8s", str) // padding
 				mutex.Unlock()
-				if done {
+				if done { // finish
 					allDone <- true
 					return
 				}
@@ -179,10 +246,12 @@ func main() {
 		}
 	}()
 
+	stopChans := make([]chan bool, WORKERS)
 	for i := 0; i < WORKERS; i++ {
+		stopChans[i] = make(chan bool)
 		progress := make(chan Progress)
 		progresses[i] = progress
-		go cracker(i, startChars, templ, progress, done)
+		go cracker(i, startChars, templ, progress, done, decanonHint, stopChans[i])
 	}
 
 	for _, ch := range CHARS {
@@ -191,10 +260,15 @@ func main() {
 	close(startChars)
 
 	for i := 0; i < WORKERS; i++ {
-		<-done
+		if found := <-done; found {
+			// stop other workers if someone found
+			for j := 0; j < WORKERS; j++ {
+				close(stopChans[j])
+			}
+		}
 	}
-	allDone <- true
-	<-allDone
+	allDone <- true // notify printer to finish
+	<-allDone       // wait for printer to actually finish
 	fmt.Printf("Finished in %s", runTime())
 }
 
@@ -241,24 +315,36 @@ func runTime() string {
 	return d.String()
 }
 
-func cracker(id int, chars chan rune, commonTempl []rune, progress chan Progress, done chan bool) {
+func cracker(
+	id int,
+	chars chan rune,
+	commonTempl []rune,
+	progress chan Progress,
+	done chan<- bool,
+	decanonHint []int,
+	stop chan bool,
+) {
+	found := false
 	templ := make([]rune, len(commonTempl))
 	copy(templ, commonTempl)
 	wordLen := len(templ)
-
-	defer func() {
-		done <- true
-		close(progress)
-	}()
-
-	if wordLen == 0 {
-		return
-	}
 
 	var radix = len(CHARS)
 	var indexes = make([]int, wordLen)
 	var word = make([]rune, wordLen)
 	var counter = 0
+
+	defer func() {
+		progress <- Progress{word, counter}
+		close(progress)
+		for range chars { // empty chars
+		}
+		done <- found
+	}()
+
+	if wordLen == 0 {
+		return
+	}
 
 	charPos := 0
 	for pos, ch := range templ {
@@ -305,18 +391,33 @@ func cracker(id int, chars chan rune, commonTempl []rune, progress chan Progress
 			if i%modPrint == 0 {
 				select {
 				case progress <- Progress{word, counter}:
+				case <-stop:
+					return
 				default: // nothing
 				}
 			}
 			counter++
 			if murmur3.Sum32WithSeed(escape(word, buf), 0) == HASH { // check if word is matching
-				note := "?"
-				if isPossibleWord(word) {
+				note := ""
+				isDecanon := decanonHint != nil && murmur3.Sum32WithSeed(escape(decanon(word, decanonHint), buf), 0) == HASH
+				if isDecanon {
 					note = "✔"
 				}
-				fmt.Printf("%s%sWord found: %s %s %s\n\n\n",
-					CURSUP, CURSUP, strings.Replace(string(word), "χ", "ch", 1), note, spaces((wordLen+1)*(WORKERS-1)-11),
-				)
+				if decanonHint == nil {
+					note = "×"
+					if isPossibleWord(word) {
+						note = "?"
+					}
+				}
+				if note != "" {
+					fmt.Printf("%s%sWord found: %s %s %s\n\n\n",
+						CURSUP, CURSUP, strings.Replace(string(word), "χ", "ch", 1), note, spaces((wordLen+1)*(WORKERS-1)-11),
+					)
+					if isDecanon { // found for sure!
+						found = true
+						return
+					}
+				}
 			}
 			// increment indexes
 			for pos, mod := 0, 1; pos < wordLen; pos++ {
@@ -334,7 +435,6 @@ func cracker(id int, chars chan rune, commonTempl []rune, progress chan Progress
 			}
 		}
 	} // chars depleted
-	progress <- Progress{word, counter}
 
 }
 
@@ -346,6 +446,7 @@ func spaces(n int) string {
 }
 
 func isPossibleWord(word []rune) bool {
+
 	w := []byte(string(word))
 	return len(word) <= 4 || isSyllabes.Match(w) &&
 		!tooMuchConsonants.Match(w) &&
