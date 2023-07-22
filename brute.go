@@ -8,7 +8,6 @@ import (
 	"runtime"
 	"strconv"
 	"strings"
-	"sync"
 	"time"
 	"unicode/utf8"
 
@@ -188,14 +187,12 @@ func main() {
 	file, _ := os.Create("./cpu.pprof")
 	pprof.StartCPUProfile(file)
 	defer pprof.StopCPUProfile()
-	// defer file.Close()
+	defer file.Close()
 
 	go func() { // output printer
 		ticker := time.NewTicker(time.Second / 30)
 		words := make([]string, WORKERS)
 		counts := make([]int, WORKERS)
-
-		mutex := sync.Mutex{}
 
 		done := false // used to stop the printer
 
@@ -205,7 +202,6 @@ func main() {
 			case <-allDone:
 				done = true // set to stop in next ticker
 			case <-ticker.C:
-				mutex.Lock()
 				counter := 0
 				for i := 0; i < WORKERS; i++ {
 					if prog, ok := <-progresses[i]; ok {
@@ -237,8 +233,7 @@ func main() {
 					fmt.Sprintf("%.1f%s/s", speed, unit),
 				)
 				fmt.Printf("% -8s", str) // padding
-				mutex.Unlock()
-				if done { // finish
+				if done {                // finish
 					allDone <- true
 					return
 				}
@@ -259,12 +254,10 @@ func main() {
 	}
 	close(startChars)
 
-	for i := 0; i < WORKERS; i++ {
-		if found := <-done; found {
-			// stop other workers if someone found
-			for j := 0; j < WORKERS; j++ {
-				close(stopChans[j])
-			}
+	if found := <-done; found {
+		// stop other workers if someone found
+		for i := 0; i < WORKERS; i++ {
+			close(stopChans[i])
 		}
 	}
 	allDone <- true // notify printer to finish
@@ -272,7 +265,7 @@ func main() {
 	fmt.Printf("Finished in %s", runTime())
 }
 
-func escape(text []rune, t []byte) []byte { // WARKING only works on subset of unicode
+func escape(text []rune, t []byte) []byte { // WARNING only works on subset of unicode
 	j := 0
 	hex := "0123456789abcdef"
 	for _, c := range text {
@@ -378,9 +371,9 @@ func cracker(
 		var max = int(math.Pow(float64(radix), float64(wordLen-knownChars))) // max iteration
 
 		var buf = make([]byte, 3*2*len(word)) // each char is up to 2 bytes encoded in 3 chars
-		const modPrint = 1 << 8
+		const modPrint = 1 << 16
 
-		for i := 0; i < max; i++ {
+		for i := 0; i < max; i++ { // each word
 			for pos, ci := range indexes { // asign chars to word by indexes
 				if ci == -1 {
 					word[pos] = ' '
@@ -390,10 +383,14 @@ func cracker(
 			}
 			if i%modPrint == 0 {
 				select {
-				case progress <- Progress{word, counter}:
 				case <-stop:
 					return
-				default: // nothing
+				default:
+					select {
+					case progress <- Progress{word, counter}:
+					default:
+						// nothing
+					}
 				}
 			}
 			counter++
